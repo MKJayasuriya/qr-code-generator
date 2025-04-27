@@ -55,7 +55,7 @@ pub fn Content() -> impl IntoView {
         <main class="content">
         <Router>
             <main>
-                <Routes fallback=NotFound>
+                <Routes fallback=|| view! { <NotFound/> }>
                     <Route path=path!("") view=HomePage />
                     <Route path=path!("/generate") view=qr::Home />
                 </Routes>

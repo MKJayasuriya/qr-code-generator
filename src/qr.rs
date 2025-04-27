@@ -1,16 +1,21 @@
-use leptos::prelude::*;
-use leptos::*;
-use serde::{Deserialize, Serialize};
+use leptos::{logging, prelude::*};
 
-#[derive(Deserialize, Clone, Serialize, Debug)]
-pub struct GenerateInput {
-    pub input: String,
-}
+#[server]
+async fn generate(input: String) -> Result<String, ServerFnError> {
+    use base64::engine::general_purpose::STANDARD as base64_engine;
+    use base64::Engine as _;
+    use qrcode_generator::QrCodeEcc;
 
-#[server(Generate, "/api/generate")]
-pub async fn generate(input: GenerateInput) -> Result<String, ServerFnError> {
-    println!("Received input: {:?}", input);
-    Ok(format!("Received: {}", input.input))
+    // Generate SVG
+    let svg_string =
+        qrcode_generator::to_svg_to_string(&input, QrCodeEcc::Low, 200, None::<&str>).unwrap();
+
+    // Convert SVG into base64
+    let svg_bytes = svg_string.into_bytes();
+    let base64_svg = base64_engine.encode(svg_bytes);
+
+    // Return as a data URL
+    Ok(format!("data:image/svg+xml;base64,{}", base64_svg))
 }
 
 #[component]
@@ -22,39 +27,61 @@ pub fn QrHeader(header_text: String) -> impl IntoView {
     }
 }
 
+/// Renders the home page of your application.
 #[component]
 pub fn Home() -> impl IntoView {
-    // This creates the action bound to the `generate` function
-    let generate = create_server_action::<Generate>();
-
+    let generate = ServerAction::<Generate>::new();
     view! {
         <QrHeader header_text="Qr gen".to_string() />
         <QrForm generate />
     }
 }
-
 #[component]
 pub fn QrForm(generate: ServerAction<Generate>) -> impl IntoView {
-    let submission = generate.input();
     let response = generate.value();
 
     view! {
-        <div>
-            <ActionForm action=generate>
-                <input type="text" name="input" />
-                <button type="submit">"Generate"</button>
-            </ActionForm>
+        <h1>"Test the action form!"</h1>
+        <ErrorBoundary fallback=move |error| {
+            format!("{:#?}", error.get())
+        }>
+            <div>
+                // Success state
+                <Show when=move || response.get().map(|res| res.is_ok()) == Some(true)>
+                    {move || {
+                        let data_url = response.get().unwrap().unwrap();
+                        view! {
+                            <div>
+                                <img src={data_url} alt="QR Code" />
+                            </div>
+                        }
+                    }}
+                </Show>
 
-            <Show
-                when=move || response().is_some()
-                fallback=|| view! { <p>Submit something to generate.</p> }
-            >
-                {move || match response() {
-                    Some(Ok(message)) => view! { <p>{message}</p> },
-                    Some(Err(e)) => view! { <p>"Error: "{e.to_string()}</p> },
-                    None => view! { <p>"Loading..."</p> },
-                }}
-            </Show>
-        </div>
+                // Error state
+                <Show when=move || response.get().map(|res| res.is_err()) == Some(true)>
+                    {move || {
+                        let err = response.get().unwrap().unwrap_err();
+                        view! {
+                            <div>
+                                <p style="color: red;">"Error: " {err.to_string()}</p>
+                            </div>
+                        }
+                    }}
+                </Show>
+
+                // Loading state
+                <Show when=move || response.get().is_none()>
+                    <div>
+                        <p>"Generating QR code..."</p>
+                    </div>
+                </Show>
+            </div>
+
+            <ActionForm action=generate attr:class="form">
+                <label>"Input: "<input type="text" name="input"/></label>
+                <button type="submit">Submit</button>
+            </ActionForm>
+        </ErrorBoundary>
     }
 }
